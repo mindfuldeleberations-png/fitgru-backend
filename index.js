@@ -6,6 +6,8 @@ const bcrypt = require("bcryptjs");
 const sgMail = require("@sendgrid/mail");
 const crypto = require("crypto");
 const path = require("path");
+const serviceAccount = require('./fitgru-app-firebase-adminsdk-fbsvc-ad36515dde.json');
+
 
 // ===== Setup =====
 const app = express();
