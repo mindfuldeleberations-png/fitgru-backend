@@ -5,40 +5,24 @@ const admin = require("firebase-admin");
 const bcrypt = require("bcryptjs");
 const sgMail = require("@sendgrid/mail");
 const crypto = require("crypto");
-const path = require("path");
+require("dotenv").config(); // optional for local dev
 
-const admin = require('firebase-admin');
-
-const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_B64, 'base64').toString('utf8');
+// ===== Firebase Admin Initialization =====
+// 👇 Using base64-encoded service account (Render-safe)
+const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_B64, "base64").toString("utf8");
 const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-
-const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
-
-
-
 // ===== Setup =====
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Set your Firebase project ID
+// Set your Firebase project ID (optional)
 process.env.GOOGLE_CLOUD_PROJECT = "fitgru-app";
-
-
-// Initialize Firebase Admin SDK
-admin.initializeApp({
-  credential: admin.credential.cert(
-    path.join(__dirname, "fitgru-app-firebase-adminsdk-fbsvc-ad36515dde.json")
-  ),
-});
 
 // ===== Config =====
 const VERIF_COLLECTION = "email_verifications";
@@ -46,7 +30,7 @@ const VERIF_TTL_MINUTES = 15;
 const MAX_SENDS_PER_HOUR = 5;
 const MAX_ATTEMPTS = 5;
 
-// SendGrid Setup
+// ===== SendGrid Setup =====
 const sendgridKey = process.env.SENDGRID_API_KEY;
 if (sendgridKey) {
   sgMail.setApiKey(sendgridKey);
