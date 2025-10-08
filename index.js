@@ -6,7 +6,22 @@ const bcrypt = require("bcryptjs");
 const sgMail = require("@sendgrid/mail");
 const crypto = require("crypto");
 const path = require("path");
-const serviceAccount = require('./fitgru-app-firebase-adminsdk-fbsvc-ad36515dde.json');
+
+const admin = require('firebase-admin');
+
+const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_B64, 'base64').toString('utf8');
+const serviceAccount = JSON.parse(decoded);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+
+const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 
 
 // ===== Setup =====
