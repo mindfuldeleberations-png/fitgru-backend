@@ -1,0 +1,19 @@
+{
+  "name": "email-verification-server",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "main": "index.js",
+  "engines": {
+    "node": "18.x"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "firebase-admin": "^13.5.0"
+  }
+}
