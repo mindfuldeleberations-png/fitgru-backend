@@ -91,7 +91,7 @@ app.post("/sendVerificationCode", async (req, res) => {
     if (sendgridKey) {
       await sgMail.send({
         to: email,
-        from: "no-reply@yourdomain.com",
+        from: "mindful.deleberations@gmail.com",
         subject: "Your verification code",
         text: `Your code is ${code}. It expires in ${VERIF_TTL_MINUTES} minutes.`,
       });
@@ -101,7 +101,7 @@ app.post("/sendVerificationCode", async (req, res) => {
 
     res.json({ success: true, expiresInMinutes: VERIF_TTL_MINUTES });
   } catch (err) {
-    console.error("Error in sendVerificationCode:", err);
+    console.error("SendGrid Error:", JSON.stringify(err.response?.body || err, null, 2));
     res.status(500).json({ error: "Internal server error" });
   }
 });
