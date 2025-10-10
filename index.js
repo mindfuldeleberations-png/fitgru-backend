@@ -101,8 +101,12 @@ app.post("/sendVerificationCode", async (req, res) => {
 
     res.json({ success: true, expiresInMinutes: VERIF_TTL_MINUTES });
   } catch (err) {
-    console.error("SendGrid Error:", JSON.stringify(err.response?.body || err, null, 2));
-    res.status(500).json({ error: "Internal server error" });
+    // ===== TEMPORARY DEBUG BLOCK =====
+    const sgErr = err.response?.body || err.message || err;
+    console.error("SendGrid Error:", JSON.stringify(sgErr, null, 2));
+    // Return SendGrid body directly for debugging
+    return res.status(502).json({ error: "sendgrid_error", detail: sgErr });
+    // ===== END DEBUG BLOCK =====
   }
 });
 
