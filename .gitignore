@@ -1,2 +1,4 @@
 node_modules/
-*.local
+*.local".env" 
+"key.b64" 
+"fitgru-app-firebase-adminsdk-fbsvc-ad36515dde.json" 
