@@ -1,203 +1,133 @@
-// ===== Imports =====
-const express = require("express");
-const cors = require("cors");
-const admin = require("firebase-admin");
-const bcrypt = require("bcryptjs");
-const sgMail = require("@sendgrid/mail");
-const crypto = require("crypto");
-require("dotenv").config(); // optional for local dev
+// index.js — for Render backend, Firebase Auth + Firestore + SendGrid
+import express from "express";
+import admin from "firebase-admin";
+import cors from "cors";
+import dotenv from "dotenv";
+import sgMail from "@sendgrid/mail";
+import { v4 as uuidv4 } from "uuid";
 
-// ===== Firebase Admin Initialization =====
-// 👇 Using base64-encoded service account (Render-safe)
-const decoded = Buffer.from(process.env.GOOGLE_APPLICATION_CREDENTIALS_B64, "base64").toString("utf8");
-const serviceAccount = JSON.parse(decoded);
+dotenv.config();
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
-
-// ===== Setup =====
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Set your Firebase project ID (optional)
-process.env.GOOGLE_CLOUD_PROJECT = "fitgru-app";
+// ✅ Initialize Firebase Admin (Service Account JSON)
+import serviceAccount from "./fitgru-app-firebase-adminsdk-fbsvc-ad36515dde.json" assert { type: "json" };
 
-// ===== Config =====
-const VERIF_COLLECTION = "email_verifications";
-const VERIF_TTL_MINUTES = 15;
-const MAX_SENDS_PER_HOUR = 5;
-const MAX_ATTEMPTS = 5;
-
-// ===== SendGrid Setup =====
-const sendgridKey = process.env.SENDGRID_API_KEY;
-if (sendgridKey) {
-  sgMail.setApiKey(sendgridKey);
-} else {
-  console.warn("⚠️ No SENDGRID_API_KEY found in environment — emails will not send.");
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+  });
 }
 
-// ===== Helpers =====
-function random6() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
-}
+const db = admin.firestore();
 
-function docIdFor(email, deviceId) {
-  return crypto.createHash("sha256").update(`${email}|${deviceId}`).digest("hex");
-}
+// ✅ Setup SendGrid
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-// ===== Endpoint: Send Verification Code =====
+// ✅ Helper: Generate random 6-digit code
+const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString();
+
+// ✅ POST /sendVerificationCode
 app.post("/sendVerificationCode", async (req, res) => {
   try {
-    const { email, deviceId, label = "", platform = "" } = req.body;
+    const { email, deviceId } = req.body;
 
     if (!email || !deviceId) {
-      return res.status(400).json({ error: "Missing email or deviceId" });
+      return res.status(400).json({ error: "Email and deviceId are required" });
     }
 
-    const db = admin.firestore();
+    const code = generateCode();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
 
-    // Rate limit: max 5 sends/hour
-    const hourAgo = admin.firestore.Timestamp.fromMillis(Date.now() - 60 * 60 * 1000);
-    const recent = await db
-      .collection(VERIF_COLLECTION)
-      .where("email", "==", email)
-      .where("createdAt", ">=", hourAgo)
-      .get();
-
-    if (recent.size >= MAX_SENDS_PER_HOUR) {
-      return res.status(429).json({ error: "Too many sends, try again later" });
-    }
-
-    const code = random6();
-    const hashed = await bcrypt.hash(code, 10);
-    const docId = docIdFor(email, deviceId);
-
-    await db.collection(VERIF_COLLECTION).doc(docId).set({
+    // ✅ Store verification code in Firestore
+    await db.collection("email_verifications").doc(email).set({
       email,
       deviceId,
-      label,
-      platform,
-      hashedCode: hashed,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      expiresAt: admin.firestore.Timestamp.fromMillis(
-        Date.now() + VERIF_TTL_MINUTES * 60 * 1000
-      ),
-      attempts: 0,
+      code,
+      createdAt: new Date(),
+      expiresAt,
     });
 
-    // Send email
-    if (sendgridKey) {
-      await sgMail.send({
-        to: email,
-        from: "mindful.deleberations@gmail.com",
-        subject: "Your verification code",
-        text: `Your code is ${code}. It expires in ${VERIF_TTL_MINUTES} minutes.`,
-      });
-    } else {
-      console.log(`Generated code (not emailed): ${code}`);
-    }
+    // ✅ Send email via SendGrid
+    const msg = {
+      to: email,
+      from: "no-reply@fitgru.com", // your verified sender
+      subject: "Your FitnessGuru Verification Code",
+      text: `Your verification code is: ${code}. It expires in 10 minutes.`,
+    };
+    await sgMail.send(msg);
 
-    res.json({ success: true, expiresInMinutes: VERIF_TTL_MINUTES });
-  } catch (err) {
-    // ===== TEMPORARY DEBUG BLOCK =====
-    const sgErr = err.response?.body || err.message || err;
-    console.error("SendGrid Error:", JSON.stringify(sgErr, null, 2));
-    // Return SendGrid body directly for debugging
-    return res.status(502).json({ error: "sendgrid_error", detail: sgErr });
-    // ===== END DEBUG BLOCK =====
+    res.status(200).json({
+      success: true,
+      message: "Verification code sent successfully",
+    });
+  } catch (error) {
+    console.error("Error sending verification code:", error);
+    res.status(500).json({ error: "Failed to send verification code" });
   }
 });
 
-// ===== Endpoint: Verify Code =====
+// ✅ POST /verifyCode
 app.post("/verifyCode", async (req, res) => {
   try {
-    const { email, deviceId, code, label = "", platform = "" } = req.body;
-    if (!email || !deviceId || !code)
+    const { email, deviceId, code } = req.body;
+    if (!email || !deviceId || !code) {
       return res.status(400).json({ error: "Missing fields" });
+    }
 
-    const db = admin.firestore();
-    const docId = docIdFor(email, deviceId);
-    const docRef = db.collection(VERIF_COLLECTION).doc(docId);
+    const docRef = db.collection("email_verifications").doc(email);
+    const doc = await docRef.get();
 
-    const userRecord = await admin.auth().getUserByEmail(email);
-    const uid = userRecord.uid;
-    const userRef = db.collection("users").doc(uid);
+    if (!doc.exists) {
+      return res.status(400).json({ error: "Invalid or expired code" });
+    }
 
-    await db.runTransaction(async (txn) => {
-      const snap = await txn.get(docRef);
-      if (!snap.exists) throw new Error("no_verification");
-      const v = snap.data();
+    const data = doc.data();
 
-      if (v.expiresAt && v.expiresAt.toMillis() < Date.now()) {
-        txn.delete(docRef);
-        throw new Error("expired");
-      }
+    if (data.code !== code) {
+      return res.status(400).json({ error: "Invalid or expired code" });
+    }
 
-      if ((v.attempts || 0) >= MAX_ATTEMPTS)
-        throw new Error("too_many_attempts");
+    if (Date.now() > data.expiresAt) {
+      return res.status(400).json({ error: "Code expired" });
+    }
 
-      const match = await bcrypt.compare(code, v.hashedCode || "");
-      if (!match) {
-        txn.update(docRef, {
-          attempts: admin.firestore.FieldValue.increment(1),
-        });
-        throw new Error("wrong_code");
-      }
+    // ✅ Check or create Firebase Auth user
+    let userRecord;
+    try {
+      userRecord = await admin.auth().getUserByEmail(email);
+    } catch (err) {
+      // Create user if not exist
+      userRecord = await admin.auth().createUser({
+        email,
+        emailVerified: true,
+        password: uuidv4(), // random
+      });
+    }
 
-      const userSnap = await txn.get(userRef);
-      const user = userSnap.exists ? userSnap.data() : {};
-      const devices = user.devices || [];
-      const deviceExists = devices.some((d) => d.deviceId === deviceId);
+    // ✅ Mark email verified
+    await admin.auth().updateUser(userRecord.uid, { emailVerified: true });
 
-      const today = new Date().toISOString().slice(0, 10);
-      const meta = user.deviceChangeMeta || { date: today, changesToday: 0 };
-      const changesToday = meta.date === today ? meta.changesToday || 0 : 0;
+    // ✅ Optionally delete code after use
+    await docRef.delete();
 
-      if (!deviceExists) {
-        if (changesToday >= 1) throw new Error("device_change_limit");
-
-        const newDevice = {
-          deviceId,
-          label,
-          platform,
-          verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          lastUsedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
-
-        txn.set(
-          userRef,
-          {
-            devices: admin.firestore.FieldValue.arrayUnion(newDevice),
-            deviceChangeMeta: { date: today, changesToday: changesToday + 1 },
-          },
-          { merge: true }
-        );
-      } else {
-        const updatedDevices = devices.map((d) =>
-          d.deviceId === deviceId
-            ? {
-                ...d,
-                verifiedAt: admin.firestore.FieldValue.serverTimestamp(),
-                lastUsedAt: admin.firestore.FieldValue.serverTimestamp(),
-              }
-            : d
-        );
-        txn.update(userRef, { devices: updatedDevices });
-      }
-
-      txn.delete(docRef);
+    res.status(200).json({
+      success: true,
+      message: "Email verified successfully",
     });
-
-    res.json({ success: true, uid });
-  } catch (err) {
-    console.error("Error in verifyCode:", err);
-    res.status(400).json({ error: err.message });
+  } catch (error) {
+    console.error("Verification failed:", error);
+    res.status(500).json({ error: "Verification failed" });
   }
 });
 
-// ===== Start Server =====
+// ✅ Root endpoint for test
+app.get("/", (req, res) => {
+  res.send("✅ FitnessGuru backend is running.");
+});
+
+// ✅ Start server
 const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
