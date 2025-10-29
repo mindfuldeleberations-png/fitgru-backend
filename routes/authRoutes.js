@@ -10,19 +10,30 @@ const generateCode = () => Math.floor(100000 + Math.random() * 900000).toString(
 // ------------------- SEND VERIFICATION CODE -------------------
 router.post("/sendVerificationCode", async (req, res) => {
   const { db, sgMail } = req.app.locals;
+
   try {
     const { email, deviceId } = req.body;
-    if (!email || !deviceId) return res.status(400).json({ error: "Missing email or deviceId" });
+    if (!email || !deviceId)
+      return res.status(400).json({ error: "Missing email or deviceId" });
 
     const code = generateCode();
     const hashedCode = await bcrypt.hash(code, 10);
-    const expiresAt = req.app.locals.admin.firestore.Timestamp.fromMillis(Date.now() + 5 * 60 * 1000);
+    const expiresAt = req.app.locals.admin.firestore.Timestamp.fromMillis(
+      Date.now() + 5 * 60 * 1000
+    );
 
-    const oldQ = await db.collection("email_verifications").where("email", "==", email).where("deviceId", "==", deviceId).get();
+    // Delete any existing verification records for this user/device
+    const oldQ = await db
+      .collection("email_verifications")
+      .where("email", "==", email)
+      .where("deviceId", "==", deviceId)
+      .get();
+
     const batch = db.batch();
     oldQ.forEach((d) => batch.delete(d.ref));
     if (!oldQ.empty) await batch.commit();
 
+    // Store new verification record
     await db.collection("email_verifications").add({
       email,
       deviceId,
@@ -32,14 +43,26 @@ router.post("/sendVerificationCode", async (req, res) => {
       attempts: 0,
     });
 
- await sgMail.send({
-      to: email,
-      from: process.env.SENDGRID_SENDER,
-      subject: "Your FitGru Verification Code",
-      text: `Your FitGru verification code is ${code}. It expires in 5 minutes.`,
-    });
+    // ✅ Send email with verification code
+    try {
+      const msg = {
+        to: email,
+        from: {
+          email: process.env.SENDGRID_SENDER,
+          name: "FitGru Team",
+        },
+        subject: "Your FitGru Verification Code",
+        text: `Your FitGru verification code is ${code}. It expires in 5 minutes.`,
+        html: `<p>Your verification code is <strong>${code}</strong>. It expires in 5 minutes.</p>`,
+      };
 
-    console.log(`✅ Email send invoked for ${email} (code=${code})`);
+      await sgMail.send(msg);
+      console.log(`✅ Email sent successfully to ${email} (code=${code})`);
+    } catch (error) {
+      console.error("❌ SendGrid error:", error.response?.body || error);
+      return res.status(500).json({ error: "Failed to send verification email" });
+    }
+
     return res.json({ success: true });
   } catch (err) {
     console.error("❌ /auth/sendVerificationCode error:", err);
@@ -52,7 +75,8 @@ router.post("/verifyCode", async (req, res) => {
   const { admin, db } = req.app.locals;
   try {
     const { email, deviceId, code } = req.body;
-    if (!email || !deviceId || !code) return res.status(400).json({ error: "Missing email, deviceId, or code" });
+    if (!email || !deviceId || !code)
+      return res.status(400).json({ error: "Missing email, deviceId, or code" });
 
     const q = await db
       .collection("email_verifications")
@@ -106,7 +130,14 @@ router.post("/verifyCode", async (req, res) => {
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
       } else {
-        await userRef.set({ email, registeredDeviceId: deviceId, lastDeviceChangeAt: user.lastDeviceChangeAt || now }, { merge: true });
+        await userRef.set(
+          {
+            email,
+            registeredDeviceId: deviceId,
+            lastDeviceChangeAt: user.lastDeviceChangeAt || now,
+          },
+          { merge: true }
+        );
       }
     }
 
