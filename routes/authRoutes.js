@@ -32,13 +32,14 @@ router.post("/sendVerificationCode", async (req, res) => {
       attempts: 0,
     });
 
-    await sgMail.send({
+ await sgMail.send({
       to: email,
       from: process.env.SENDGRID_SENDER,
       subject: "Your FitGru Verification Code",
       text: `Your FitGru verification code is ${code}. It expires in 5 minutes.`,
     });
 
+    console.log(`✅ Email send invoked for ${email} (code=${code})`);
     return res.json({ success: true });
   } catch (err) {
     console.error("❌ /auth/sendVerificationCode error:", err);
